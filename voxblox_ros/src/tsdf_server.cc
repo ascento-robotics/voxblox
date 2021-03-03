@@ -358,6 +358,10 @@ void TsdfServer::processPointCloudMessageAndInsert(
     ros::WallTime start_deintegration = ros::WallTime::now();
     servicePointcloudDeintegrationQueue();
     ros::WallTime end_deintegration = ros::WallTime::now();
+    LOG(ERROR) << "Deintegrating the pointcloud that is leaving the sliding "
+                  "window took: "
+               << (end_deintegration - start_deintegration).toSec();
+
     if (verbose_) {
       ROS_INFO("Finished deintegrating in %f seconds.",
                (end_deintegration - start_deintegration).toSec());

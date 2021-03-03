@@ -1,6 +1,8 @@
 #ifndef VOXBLOX_INCLUDE_VOXBLOX_INTEGRATOR_PROJECTIVE_TSDF_INTEGRATOR_H_
 #define VOXBLOX_INCLUDE_VOXBLOX_INTEGRATOR_PROJECTIVE_TSDF_INTEGRATOR_H_
 
+#include <ros/ros.h>
+#include <visualization_msgs/MarkerArray.h>
 #include <vector>
 
 #include "voxblox/integrator/tsdf_integrator.h"
@@ -32,10 +34,13 @@ class ProjectiveTsdfIntegrator : public voxblox::TsdfIntegratorBase {
   // NOTE: Although the resolutions are integer, we store them as floating
   //       points since they are primarily used in floating point operations
   const float horizontal_resolution_;
+  const double horizontal_fov_rad_;
   const float vertical_resolution_;
   const double vertical_fov_rad_;
 
   Eigen::MatrixXf range_image_;
+
+  ros::Publisher range_image_publisher_;
 
   // Cache some commonly used runtime constants
   const size_t num_voxels_per_block_;
@@ -61,6 +66,8 @@ class ProjectiveTsdfIntegrator : public voxblox::TsdfIntegratorBase {
 
   inline float interpolate(const Eigen::MatrixXf& range_image, const float h,
                            const float w) const;
+
+  void publishRangeImage();
 };
 }  // namespace voxblox
 

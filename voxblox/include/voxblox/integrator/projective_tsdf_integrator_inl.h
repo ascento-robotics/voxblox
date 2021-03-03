@@ -18,14 +18,19 @@ ProjectiveTsdfIntegrator<interpolation_scheme>::ProjectiveTsdfIntegrator(
       vertical_resolution_(config.sensor_vertical_resolution),
       vertical_fov_rad_(config.sensor_vertical_field_of_view_degrees * M_PI /
                         180.0),
+      horizontal_fov_rad_(config.sensor_horizontal_field_of_view_degrees *
+                          M_PI / 180.0),
       range_image_(config.sensor_vertical_resolution,
                    config.sensor_horizontal_resolution),
+      range_image_publisher_(
+          ros::NodeHandle().advertise<visualization_msgs::Marker>("range_image",
+                                                                  10)),
       num_voxels_per_block_(layer_->voxels_per_side() *
                             layer_->voxels_per_side() *
                             layer_->voxels_per_side()),
       ray_intersections_per_distance_squared_(
           voxel_size_ * horizontal_resolution_ /
-          (2 * M_PI)  // horizontal point density
+          horizontal_fov_rad_  // horizontal point density
           * voxel_size_ * vertical_resolution_ /
           vertical_fov_rad_)  // vertical point density
 {
@@ -33,6 +38,8 @@ ProjectiveTsdfIntegrator<interpolation_scheme>::ProjectiveTsdfIntegrator(
       << "The horizontal sensor resolution must be a positive integer";
   CHECK_GT(vertical_resolution_, 0)
       << "The vertical sensor resolution must be a positive integer";
+  CHECK_GT(horizontal_fov_rad_, 0)
+      << "The horizontal field of view of the sensor must be a positive float";
   CHECK_GT(vertical_fov_rad_, 0)
       << "The vertical field of view of the sensor must be a positive float";
   CHECK(config_.use_const_weight) << "Scaling the weight by the inverse square "
@@ -298,7 +305,7 @@ Point ProjectiveTsdfIntegrator<interpolation_scheme>::imageToBearing(
   double altitude_angle =
       vertical_fov_rad_ * (1.0 / 2.0 - h / (vertical_resolution_ - 1.0));
   double azimuth_angle =
-      (2.0 * M_PI) * (1.0 / 2.0 - w / horizontal_resolution_);
+      (horizontal_fov_rad_) * (1.0 / 2.0 - w / horizontal_resolution_);
 
   Point bearing;
   bearing.x() = std::cos(altitude_angle) * std::cos(azimuth_angle);
@@ -334,13 +341,14 @@ bool ProjectiveTsdfIntegrator<interpolation_scheme>::bearingToImage(
   // Handle integer and floating point types appropriately
   if (std::numeric_limits<T>::is_integer) {
     *w = std::round(horizontal_resolution_ *
-                    (1.0 / 2.0 - azimuth_angle / (2.0 * M_PI)));
+                    (1.0 / 2.0 - azimuth_angle / (horizontal_fov_rad_)));
     *w = std::fmod(*w, static_cast<T>(horizontal_resolution_));
     if (*w < 0) {
       *w += horizontal_resolution_;
     }
   } else {
-    *w = horizontal_resolution_ * (1.0 / 2.0 - azimuth_angle / (2.0 * M_PI));
+    *w = horizontal_resolution_ *
+         (1.0 / 2.0 - azimuth_angle / (horizontal_fov_rad_));
     *w = std::fmod(*w, static_cast<T>(horizontal_resolution_));
     if (*w < 0.0) {
       // NOTE: The comparison below is a workaround to avoid the change in
@@ -502,6 +510,55 @@ ProjectiveTsdfIntegrator<InterpolationScheme::kAdaptive>::interpolate(
     return bilinear_distance;
   }
 }
+
+template <InterpolationScheme interpolation_scheme>
+void ProjectiveTsdfIntegrator<interpolation_scheme>::publishRangeImage() {
+  double max_value = 0;
+  for (int h = 0; h < config_.sensor_vertical_resolution; ++h) {
+    for (int w = 0; w < config_.sensor_horizontal_resolution; ++w) {
+      if (max_value < range_image_(h, w)) max_value = range_image_(h, w);
+    }
+  }
+  LOG(ERROR) << "max_value: " << max_value;
+  constexpr double kScalingFactor = 100.;
+
+  visualization_msgs::Marker marker;
+  marker.header.frame_id = "initial_pose";
+  marker.header.stamp = ros::Time();
+  marker.ns = "debug_topic";
+  marker.id = 0;
+  marker.type = visualization_msgs::Marker::POINTS;
+  marker.action = visualization_msgs::Marker::ADD;
+  marker.pose.position.x = 0;
+  marker.pose.position.y = 0;
+  marker.pose.position.z = 0;
+  marker.pose.orientation.x = 0.0;
+  marker.pose.orientation.y = 0.0;
+  marker.pose.orientation.z = 0.0;
+  marker.pose.orientation.w = 1.0;
+  marker.scale.x = 1. / kScalingFactor;
+  marker.scale.y = 1. / kScalingFactor;
+  marker.scale.z = 1. / kScalingFactor;
+
+  for (int h = 0; h < config_.sensor_vertical_resolution; ++h) {
+    for (int w = 0; w < config_.sensor_horizontal_resolution; ++w) {
+      std_msgs::ColorRGBA cube_color;
+
+      cube_color.a = 1;
+      cube_color.r = range_image_(h, w) / max_value;
+
+      geometry_msgs::Point point;
+      point.x = w / kScalingFactor;
+      point.y = h / kScalingFactor;
+
+      marker.colors.push_back(cube_color);
+      marker.points.push_back(point);
+    }
+  }
+
+  range_image_publisher_.publish(marker);
+}
+
 }  // namespace voxblox
 
 #endif  // VOXBLOX_INCLUDE_VOXBLOX_INTEGRATOR_PROJECTIVE_TSDF_INTEGRATOR_INL_H_
