@@ -62,6 +62,11 @@ void ProjectiveTsdfIntegrator<interpolation_scheme>::integratePointCloud(
   parsePointcloud(T_G_C, points_C, &range_image_, &touched_block_indices);
   range_image_and_block_selector_timer.Stop();
 
+  // TODO(alessandromorra): Add flag to deactivate this.
+  if (deintegrate == false) {
+    publishRangeImage();
+  }
+
   // Process all blocks
   timing::Timer integration_timer("integration_timer");
   if (config_.integrator_threads == 1) {
@@ -95,7 +100,12 @@ ProjectiveTsdfIntegrator<interpolation_scheme>::getReprojectedPointcloud() {
   reprojected_cloud.reserve(vertical_resolution_ * horizontal_resolution_);
   for (int h = 0; h < vertical_resolution_; ++h) {
     for (int w = 0; w < horizontal_resolution_; ++w) {
-      reprojected_cloud.emplace_back(range_image_(h, w) * imageToBearing(h, w));
+      // TODO(alessandromorra): Check if actually necessary.
+      const auto point = range_image_(h, w) * imageToBearing(h, w);
+      if (point.norm() < 0.2) {
+        continue;
+      }
+      reprojected_cloud.emplace_back(point);
     }
   }
   return reprojected_cloud;
@@ -137,7 +147,9 @@ void ProjectiveTsdfIntegrator<interpolation_scheme>::parsePointcloud(
   for (const voxblox::Point &point_C : points_C) {
     // Compute the point's bearing vector
     float distance = point_C.norm();
-    if (distance < kFloatEpsilon) {
+
+    // TODO(alessandromorra): This is conservative and not really justified.
+    if (distance < (config_.min_ray_length_m + 0.1)) {
       // Avoid divisions by zero
       continue;
     }
@@ -239,7 +251,7 @@ void ProjectiveTsdfIntegrator<interpolation_scheme>::updateTsdfVoxel(
   //       the updates applied to nearer voxels
   const float num_rays_intersecting_voxel =
       ray_intersections_per_distance_squared_ /
-        std::max(distance_to_voxel * distance_to_voxel, 1.f);
+      std::max(distance_to_voxel * distance_to_voxel, 1.f);
 
   // Skip voxels that fall outside the TSDF truncation distance
   if (sdf < -config_.default_truncation_distance) {
@@ -302,10 +314,10 @@ template <InterpolationScheme interpolation_scheme>
 template <typename T>
 Point ProjectiveTsdfIntegrator<interpolation_scheme>::imageToBearing(
     const T h, const T w) const {
-  double altitude_angle =
+  const double altitude_angle =
       vertical_fov_rad_ * (1.0 / 2.0 - h / (vertical_resolution_ - 1.0));
-  double azimuth_angle =
-      (horizontal_fov_rad_) * (1.0 / 2.0 - w / horizontal_resolution_);
+  const double azimuth_angle =
+      horizontal_fov_rad_ * (1.0 / 2.0 - w / horizontal_resolution_);
 
   Point bearing;
   bearing.x() = std::cos(altitude_angle) * std::cos(azimuth_angle);
@@ -519,7 +531,6 @@ void ProjectiveTsdfIntegrator<interpolation_scheme>::publishRangeImage() {
       if (max_value < range_image_(h, w)) max_value = range_image_(h, w);
     }
   }
-  LOG(ERROR) << "max_value: " << max_value;
   constexpr double kScalingFactor = 100.;
 
   visualization_msgs::Marker marker;
